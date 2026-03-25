@@ -77,6 +77,101 @@ connectActivityFeed();
 const WORLD_W = 1280;
 const WORLD_H = 720;
 
+// ─── BotMind: Smallville-inspired memory + intention layer ───────────────────
+class BotMind {
+  constructor(botId, config) {
+    this.botId = botId;
+    this.config = config;
+    this.memory = [];        // last 10 real events
+    this.currentTask = null; // { action, detail, station, thought }
+    this.intention = '';     // high-level goal, updated every 5 events
+  }
+
+  async onEvent(evt) {
+    // 1. Store in memory
+    this.memory.push({ ...evt, ts: Date.now() });
+    if (this.memory.length > 10) this.memory.shift();
+
+    // 2. Generate a thought using LLM
+    const thought = await this.generateThought(evt);
+
+    // 3. Update current task
+    this.currentTask = {
+      action: evt.action,
+      detail: evt.detail,
+      station: evt.station,
+      thought: thought,
+    };
+
+    // 4. Every 5 events, reflect and update high-level intention
+    if (this.memory.length % 5 === 0) {
+      this.intention = await this.reflect();
+    }
+
+    return this.currentTask;
+  }
+
+  async generateThought(evt) {
+    const recentMemory = this.memory.slice(-5)
+      .map(m => `${m.action}: ${m.detail || '(no detail)'}`)
+      .join('\n');
+
+    const prompt = `You are ${this.config.name}, ${this.config.role}.
+Recent activity:
+${recentMemory}
+
+Current action: ${evt.action}${evt.detail ? ': ' + evt.detail : ''}
+
+Write a SHORT internal thought (max 8 words) that this bot would have right now.
+Examples: "Found 3 good results, reading now", "Deploy looks clean, pushing", "User needs chapter 4"
+Just the thought, no quotes, no explanation.`;
+
+    try {
+      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer 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',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'google/gemini-flash-1.5-8b',
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: 20,
+          temperature: 0.7,
+        }),
+      });
+      const data = await res.json();
+      return data.choices?.[0]?.message?.content?.trim() || evt.action;
+    } catch {
+      return `${evt.action}${evt.detail ? ': ' + evt.detail.slice(0, 30) : ''}`;
+    }
+  }
+
+  async reflect() {
+    if (this.memory.length < 3) return this.config.role;
+    const actions = this.memory.map(m => m.action).join(', ');
+    const prompt = `You are ${this.config.name}. Recent actions: ${actions}. Summarize your current focus in 5 words or less.`;
+    try {
+      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer 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',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'google/gemini-flash-1.5-8b',
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: 15,
+        }),
+      });
+      const data = await res.json();
+      return data.choices?.[0]?.message?.content?.trim() || this.config.role;
+    } catch {
+      return this.config.role;
+    }
+  }
+}
+
 const BOTS = [
   {
     id: 'danpen',
@@ -131,8 +226,22 @@ class WorldScene extends Phaser.Scene {
     this.drawWorld();
     this.addWorkstationGlowPulses();
     this.createBots();
-    this.startBotLoops();
+    // Start intention-driven behavior loops for all bots
+    for (const bot of this.bots) { this.runBotBehavior(bot); }
     this.startIdleChecks();
+    // Update status cards from mind.intention every 10 seconds
+    this.time.addEvent({
+      delay: 10000,
+      loop: true,
+      callback: () => {
+        for (const bot of this.bots) {
+          if (bot.mind && bot.mind.intention) {
+            const el = document.getElementById(`status-${bot.config.id}`);
+            if (el) el.textContent = bot.mind.intention;
+          }
+        }
+      },
+    });
     this.eventLog = new EventLog(this);
     // Register scene for real-time events
     window._ocScene = this;
@@ -155,52 +264,24 @@ class WorldScene extends Phaser.Scene {
     });
   }
 
-  handleRealActivity(gameId, evt) {
+  async handleRealActivity(gameId, evt) {
     const bot = this.bots.find(b => b.config.id === gameId);
     if (!bot) return;
 
-    const action  = (evt.action  || '').toLowerCase();
-    const detail  = evt.detail ? `${evt.action}: ${evt.detail}` : evt.action;
-    const rawDetail = evt.detail || '';
-
-    // Update the event log panel
+    // Update the event log panel immediately
     if (this.eventLog) {
-      this.eventLog.addEvent(gameId, evt.action || '', rawDetail);
+      this.eventLog.addEvent(gameId, evt.action || '', evt.detail || '');
     }
 
-    // ── Wormy answering user → pulse/glow in place ────────────────────────
-    if (gameId === 'wormy' && action.includes('answering')) {
-      this.glowBot('wormy');
-      this.updateStatus('wormy', detail);
-      return;
-    }
+    // Show "..." bubble immediately while LLM generates thought (~300ms)
+    this.showBubble(bot, '...', 1500);
 
-    // ── Dan Pen messaging/spawning → meet with Mech ───────────────────────
-    if (gameId === 'danpen' && (action.includes('messaging') || action.includes('spawning'))) {
-      if (!bot.isMeeting) {
-        this.meetBots('danpen', 'mech', detail);
-      }
-      return;
-    }
+    // Feed event to the bot's mind — generates an LLM thought
+    const task = await bot.mind.onEvent(evt);
 
-    // ── Fleet message (Orion) → meet with Mech ────────────────────────────
-    if (action.includes('fleet message') || (gameId === 'orion' && action.includes('fleet'))) {
-      const orion = this.bots.find(b => b.config.id === 'orion');
-      if (orion && !orion.isMeeting) {
-        this.meetBots('orion', 'mech', detail);
-      }
-      return;
-    }
-
-    // ── Default behaviour ─────────────────────────────────────────────────
-    if (bot.isBusy || bot.isMeeting) return;
-    bot.isBusy = true;
-    const coords = STATION_COORDS[evt.station] || STATION_COORDS.research;
-    this.walkTo(bot, coords.x, coords.y).then(() => {
-      this.showBubble(bot, detail, 3000).then(() => {
-        bot.isBusy = false;
-      });
-    });
+    // Update status bar with thought or raw action
+    const el = document.getElementById(`status-${gameId}`);
+    if (el) el.textContent = task.thought || task.action;
   }
 
   // ── Multi-bot meeting animation ─────────────────────────────────────────────
@@ -458,7 +539,10 @@ class WorldScene extends Phaser.Scene {
       bot.bubbleBg = null;
       bot.chatting = false;
       bot.isMeeting = false;
+      bot.isBusy = false;
       bot.lastMoveTime = Date.now();
+      // Smallville: each bot has a mind for memory-driven behavior
+      bot.mind = new BotMind(botDef.id, botDef);
       this.bots.push(bot);
 
       // ── Click-to-talk interactivity ─────────────────────────────────────
@@ -563,69 +647,51 @@ class WorldScene extends Phaser.Scene {
     return container;
   }
 
-  startBotLoops() {
-    BOTS.forEach((def, i) => {
-      // Stagger initial start times
-      this.time.delayedCall(i * 800 + Math.random() * 1000, () => {
-        this.runBotLoop(this.bots[i], def);
-      });
-    });
+  // ── Smallville intention-driven behavior loop ──────────────────────────────
+  async runBotBehavior(bot) {
+    // Stagger bot starts slightly
+    await this.delay(bot.config.id === 'danpen' ? 0 :
+                     bot.config.id === 'mech'   ? 600 :
+                     bot.config.id === 'wormy'  ? 1200 : 1800);
+
+    while (true) {
+      const mind = bot.mind;
+
+      if (mind.currentTask) {
+        // Move to the correct station for this task
+        const coords = STATION_COORDS[mind.currentTask.station] || bot.config.station;
+        await this.walkTo(bot, coords.x, coords.y);
+
+        // Show the LLM-generated thought (not a random phrase)
+        const display = mind.currentTask.thought || mind.currentTask.action;
+        await this.showBubble(bot, display, 3000);
+
+        // Clear after showing
+        mind.currentTask = null;
+
+      } else if (mind.intention) {
+        // Occasionally show high-level intention as idle thought
+        if (Math.random() < 0.3) {
+          await this.showBubble(bot, mind.intention, 2000);
+        }
+        // Idle micro-movement near current position
+        const jitter = {
+          x: bot.x + (Math.random() - 0.5) * 20,
+          y: bot.y + (Math.random() - 0.5) * 10,
+        };
+        await this.walkTo(bot, jitter.x, jitter.y);
+        await this.delay(2000 + Math.random() * 3000);
+
+      } else {
+        // No task, no intention — drift back to home station and wait
+        await this.walkTo(bot, bot.config.station.x, bot.config.station.y);
+        await this.delay(3000 + Math.random() * 4000);
+      }
+    }
   }
 
-  runBotLoop(bot, def) {
-    // Stop any existing walk bob and restart cleanly
-    const loop = async () => {
-      // 1. Walk to workstation
-      await this.walkTo(bot, def.station.x, def.station.y);
-
-      // 2. Show activity bubble
-      const phrase = def.phrases[bot.phraseIndex % def.phrases.length];
-      bot.phraseIndex++;
-      bot.currentActivity = phrase;
-      this.updateStatus(def.id, phrase);
-      await this.showBubble(bot, phrase, 2500 + Math.random() * 1000);
-
-      // 3. Walk to center
-      const jitter = { x: (Math.random() - 0.5) * 80, y: (Math.random() - 0.5) * 80 };
-      await this.walkTo(bot, CENTER.x + jitter.x, CENTER.y + jitter.y);
-
-      // 4. 30% chance: walk toward another bot and chat
-      if (Math.random() < 0.30) {
-        const others = this.bots.filter(b => b !== bot && !b.chatting);
-        if (others.length > 0) {
-          const other = others[Math.floor(Math.random() * others.length)];
-          const midX = (bot.x + other.x) / 2;
-          const midY = (bot.y + other.y) / 2;
-          bot.chatting = true;
-          other.chatting = true;
-          bot.currentActivity = 'Chatting...';
-          other.currentActivity = 'Chatting...';
-          this.updateStatus(def.id, 'Chatting...');
-          this.updateStatus(other.def.id, 'Chatting...');
-          await Promise.all([
-            this.walkTo(bot, midX - 20, midY),
-            this.walkTo(other, midX + 20, midY),
-          ]);
-          await Promise.all([
-            this.showBubble(bot, '...', 2000),
-            this.showBubble(other, '...', 2000),
-          ]);
-          bot.chatting = false;
-          other.chatting = false;
-        }
-      }
-
-      // 5. Walk back to station
-      bot.currentActivity = 'Returning...';
-      this.updateStatus(def.id, 'Returning...');
-      await this.walkTo(bot, def.station.x, def.station.y);
-
-      // 6. Short pause then repeat
-      await this.wait(500 + Math.random() * 1000);
-      loop();
-    };
-
-    loop();
+  delay(ms) {
+    return new Promise(r => this.time.delayedCall(ms, r));
   }
 
   walkTo(bot, targetX, targetY) {
