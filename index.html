@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>⚡ OpenClaw World</title>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: #0a0f1e;
+      color: #e2e8f0;
+      font-family: 'Courier New', 'Lucida Console', monospace;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ── Top Bar ── */
+    #top-bar {
+      flex-shrink: 0;
+      height: 44px;
+      background: linear-gradient(90deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+      border-bottom: 1px solid #1e293b;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      z-index: 10;
+    }
+
+    #top-bar .logo {
+      font-size: 16px;
+      font-weight: bold;
+      color: #f97316;
+      text-shadow: 0 0 10px rgba(249, 115, 22, 0.5);
+      letter-spacing: 2px;
+    }
+
+    #top-bar .logo span {
+      color: #94a3b8;
+      font-size: 12px;
+      font-weight: normal;
+      margin-left: 12px;
+      letter-spacing: 1px;
+    }
+
+    #top-bar .status-right {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      font-size: 12px;
+      color: #64748b;
+    }
+
+    #top-bar .online-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: #22c55e;
+      font-weight: bold;
+    }
+
+    #top-bar .online-dot {
+      width: 8px;
+      height: 8px;
+      background: #22c55e;
+      border-radius: 50%;
+      box-shadow: 0 0 6px #22c55e;
+      animation: pulse 2s infinite;
+    }
+
+    .time-display {
+      color: #475569;
+      font-size: 11px;
+    }
+
+    /* ── Game Area ── */
+    #game-wrapper {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      background: #070d1a;
+      overflow: hidden;
+    }
+
+    #game-container {
+      position: relative;
+    }
+
+    #game-container canvas {
+      display: block;
+    }
+
+    /* ── Bottom Bar ── */
+    #bottom-bar {
+      flex-shrink: 0;
+      height: 72px;
+      background: linear-gradient(90deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+      border-top: 1px solid #1e293b;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 0 20px;
+      z-index: 10;
+    }
+
+    .bot-card {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      padding: 8px 14px;
+      min-width: 200px;
+      transition: border-color 0.3s ease;
+    }
+
+    .bot-card:hover {
+      border-color: var(--accent);
+    }
+
+    .bot-avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--accent);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      flex-shrink: 0;
+      box-shadow: 0 0 8px var(--accent);
+      position: relative;
+    }
+
+    .bot-avatar::after {
+      content: '';
+      position: absolute;
+      bottom: -1px;
+      right: -1px;
+      width: 8px;
+      height: 8px;
+      background: #22c55e;
+      border-radius: 50%;
+      border: 1px solid #0f172a;
+    }
+
+    .bot-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .bot-name {
+      font-size: 11px;
+      font-weight: bold;
+      color: var(--accent);
+      letter-spacing: 1px;
+      white-space: nowrap;
+    }
+
+    .bot-activity {
+      font-size: 10px;
+      color: #64748b;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 2px;
+      transition: color 0.3s;
+    }
+
+    /* Per-bot accent colors */
+    #card-danpen { --accent: #f97316; }
+    #card-mech   { --accent: #3b82f6; }
+    #card-wormy  { --accent: #22c55e; }
+    #card-orion  { --accent: #a855f7; }
+
+    /* Pulse animation */
+    @keyframes pulse {
+      0%, 100% { opacity: 1; box-shadow: 0 0 6px currentColor; }
+      50% { opacity: 0.5; box-shadow: 0 0 2px currentColor; }
+    }
+
+    /* Scanline overlay on game */
+    #game-wrapper::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 3px,
+        rgba(0,0,0,0.03) 3px,
+        rgba(0,0,0,0.03) 4px
+      );
+      pointer-events: none;
+      z-index: 5;
+    }
+
+    /* Phase label watermark */
+    #phase-label {
+      position: absolute;
+      top: 8px;
+      right: 12px;
+      font-size: 9px;
+      color: #1e293b;
+      letter-spacing: 2px;
+      z-index: 6;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Bar -->
+  <div id="top-bar">
+    <div class="logo">
+      ⚡ OPENCLAW WORLD
+      <span>// Phase 1</span>
+    </div>
+    <div class="status-right">
+      <div class="online-badge">
+        <div class="online-dot"></div>
+        4 bots online
+      </div>
+      <div class="time-display" id="clock">--:--:-- UTC</div>
+    </div>
+  </div>
+
+  <!-- Game -->
+  <div id="game-wrapper">
+    <div id="game-container"></div>
+    <div id="phase-label">v0.1.0 — ALPHA</div>
+  </div>
+
+  <!-- Bottom Status Bar -->
+  <div id="bottom-bar">
+
+    <div class="bot-card" id="card-danpen">
+      <div class="bot-avatar">🔬</div>
+      <div class="bot-info">
+        <div class="bot-name">DAN PEN</div>
+        <div class="bot-activity" id="status-danpen">Initializing...</div>
+      </div>
+    </div>
+
+    <div class="bot-card" id="card-mech">
+      <div class="bot-avatar">⚙️</div>
+      <div class="bot-info">
+        <div class="bot-name">MECH</div>
+        <div class="bot-activity" id="status-mech">Initializing...</div>
+      </div>
+    </div>
+
+    <div class="bot-card" id="card-wormy">
+      <div class="bot-avatar">💬</div>
+      <div class="bot-info">
+        <div class="bot-name">WORMY</div>
+        <div class="bot-activity" id="status-wormy">Initializing...</div>
+      </div>
+    </div>
+
+    <div class="bot-card" id="card-orion">
+      <div class="bot-avatar">📋</div>
+      <div class="bot-info">
+        <div class="bot-name">ORION</div>
+        <div class="bot-activity" id="status-orion">Initializing...</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Live Clock -->
+  <script>
+    function updateClock() {
+      const now = new Date();
+      const hh = String(now.getUTCHours()).padStart(2, '0');
+      const mm = String(now.getUTCMinutes()).padStart(2, '0');
+      const ss = String(now.getUTCSeconds()).padStart(2, '0');
+      document.getElementById('clock').textContent = `${hh}:${mm}:${ss} UTC`;
+    }
+    updateClock();
+    setInterval(updateClock, 1000);
+  </script>
+
+  <!-- Phaser Game -->
+  <script src="src/world.js"></script>
+
+</body>
+</html>
