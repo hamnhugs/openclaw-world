@@ -1,5 +1,78 @@
-// OpenClaw World — Phase 1
+// OpenClaw World — Phase 2
 // 4 AI bots walking around a sci-fi office/lab
+// Real-time activity feed via Socket.io from 82.197.92.190:3001
+
+// ─── Real-time activity connection ───────────────────────────────────────────
+const ACTIVITY_SERVER = 'http://82.197.92.190:3001';
+
+// Map bot IDs between server (dan_pen) and game (danpen)
+const BOT_ID_MAP = { dan_pen: 'danpen', mech: 'mech', wormy: 'wormy', orion: 'orion' };
+
+// Station → game coordinates
+const STATION_COORDS = {
+  research: { x: 160, y: 120 },
+  server:   { x: 1120, y: 120 },
+  comms:    { x: 160, y: 600 },
+  project:  { x: 1120, y: 600 },
+  center:   { x: 640, y: 360 },
+};
+
+// Global activity feed (updated by socket, read by WorldScene)
+window._ocActivity = {};
+window._ocSocket = null;
+
+function connectActivityFeed() {
+  if (typeof io === 'undefined') {
+    console.warn('[OC World] Socket.io not loaded — running in offline mode');
+    return;
+  }
+
+  try {
+    const socket = io(ACTIVITY_SERVER, {
+      transports: ['polling', 'websocket'],
+      reconnectionDelay: 3000,
+      timeout: 5000,
+    });
+    window._ocSocket = socket;
+
+    socket.on('connect', () => {
+      console.log('[OC World] Connected to activity feed');
+      document.getElementById('connection-dot')?.classList.add('live');
+    });
+
+    socket.on('disconnect', () => {
+      console.log('[OC World] Disconnected from activity feed');
+      document.getElementById('connection-dot')?.classList.remove('live');
+    });
+
+    socket.on('bot_event', (evt) => {
+      const gameId = BOT_ID_MAP[evt.bot];
+      if (!gameId) return;
+      window._ocActivity[gameId] = evt;
+      // Dispatch to scene if available
+      if (window._ocScene) {
+        window._ocScene.handleRealActivity(gameId, evt);
+      }
+    });
+
+    socket.on('bot_state', (state) => {
+      window._ocBotState = state;
+      // Update status bar
+      for (const [serverId, data] of Object.entries(state)) {
+        const gameId = BOT_ID_MAP[serverId];
+        if (!gameId) continue;
+        const el = document.getElementById(`status-${gameId}`);
+        if (el) el.textContent = data.activity?.slice(0, 35) || 'idle';
+      }
+    });
+
+  } catch (e) {
+    console.warn('[OC World] Could not connect to activity feed:', e.message);
+  }
+}
+
+// Start connection attempt
+connectActivityFeed();
 
 const WORLD_W = 1280;
 const WORLD_H = 720;
@@ -56,6 +129,43 @@ class WorldScene extends Phaser.Scene {
     this.drawWorld();
     this.createBots();
     this.startBotLoops();
+    // Register scene for real-time events
+    window._ocScene = this;
+    // Show live indicator
+    this.updateConnectionBadge();
+  }
+
+  updateConnectionBadge() {
+    this.time.addEvent({
+      delay: 2000,
+      loop: true,
+      callback: () => {
+        const connected = window._ocSocket?.connected;
+        const badge = document.getElementById('live-badge');
+        if (badge) {
+          badge.textContent = connected ? '● LIVE' : '○ OFFLINE';
+          badge.style.color = connected ? '#22c55e' : '#ef4444';
+        }
+      }
+    });
+  }
+
+  handleRealActivity(gameId, evt) {
+    // Find the bot object
+    const bot = this.bots.find(b => b.config.id === gameId);
+    if (!bot || bot.isBusy) return;
+
+    // Map station name to coordinates
+    const coords = STATION_COORDS[evt.station] || STATION_COORDS.research;
+
+    // Interrupt current loop and react to real event
+    bot.isBusy = true;
+    const detail = evt.detail ? `${evt.action}: ${evt.detail}` : evt.action;
+    this.walkTo(bot, coords.x, coords.y).then(() => {
+      this.showBubble(bot, detail, 3000).then(() => {
+        bot.isBusy = false;
+      });
+    });
   }
 
   drawWorld() {
