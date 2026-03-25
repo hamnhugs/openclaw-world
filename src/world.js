@@ -3,7 +3,7 @@
 // Real-time activity feed via Socket.io from 82.197.92.190:3001
 
 // ─── Real-time activity connection ───────────────────────────────────────────
-const ACTIVITY_SERVER = 'http://82.197.92.190:3001';
+const ACTIVITY_SERVER = 'https://manufacture-satisfied-sustainable-amplifier.trycloudflare.com';
 
 // Map bot IDs between server (dan_pen) and game (danpen)
 const BOT_ID_MAP = { dan_pen: 'danpen', mech: 'mech', wormy: 'wormy', orion: 'orion' };
