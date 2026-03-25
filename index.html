@@ -226,6 +226,153 @@
       letter-spacing: 2px;
       z-index: 6;
     }
+
+    /* ── Conversation Panel ── */
+    #conv-panel {
+      display: none;
+      position: absolute;
+      bottom: 60px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 480px;
+      max-width: calc(100vw - 32px);
+      background: #0f172a;
+      border: 1px solid var(--bot-color, #f97316);
+      border-radius: 12px;
+      padding: 20px;
+      z-index: 200;
+      box-shadow: 0 0 40px rgba(0,0,0,0.85), 0 0 20px rgba(0,0,0,0.5);
+      font-family: 'Courier New', monospace;
+    }
+
+    #conv-panel .panel-header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    #bot-face {
+      width: 80px;
+      height: 80px;
+      border-radius: 8px;
+      border: 1px solid var(--bot-color, #f97316);
+      flex-shrink: 0;
+      image-rendering: pixelated;
+    }
+
+    #conv-bot-name {
+      font-size: 17px;
+      font-weight: bold;
+      color: var(--bot-color, #f97316);
+      letter-spacing: 1px;
+    }
+
+    #conv-bot-role {
+      font-size: 11px;
+      color: #64748b;
+      margin-top: 2px;
+      letter-spacing: 0.5px;
+    }
+
+    #close-conv-btn {
+      margin-left: auto;
+      background: none;
+      border: none;
+      color: #64748b;
+      font-size: 20px;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 4px;
+      line-height: 1;
+      transition: color 0.2s;
+    }
+    #close-conv-btn:hover { color: #e2e8f0; }
+
+    #chat-history {
+      height: 180px;
+      overflow-y: auto;
+      margin-bottom: 12px;
+      padding: 10px;
+      background: #1e293b;
+      border-radius: 8px;
+      font-size: 13px;
+      line-height: 1.6;
+      scrollbar-width: thin;
+      scrollbar-color: #334155 #1e293b;
+    }
+    #chat-history::-webkit-scrollbar { width: 4px; }
+    #chat-history::-webkit-scrollbar-track { background: #1e293b; }
+    #chat-history::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+
+    .chat-input-row {
+      display: flex;
+      gap: 8px;
+      align-items: stretch;
+    }
+
+    #chat-input {
+      flex: 1;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 10px 12px;
+      color: #e2e8f0;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    #chat-input:focus {
+      border-color: var(--bot-color, #f97316);
+    }
+    #chat-input:disabled {
+      opacity: 0.5;
+    }
+
+    #send-btn {
+      background: var(--bot-color, #f97316);
+      border: none;
+      border-radius: 8px;
+      padding: 10px 16px;
+      color: #0f172a;
+      font-weight: bold;
+      cursor: pointer;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      transition: opacity 0.2s, transform 0.1s;
+      white-space: nowrap;
+    }
+    #send-btn:hover { opacity: 0.9; transform: scale(1.02); }
+    #send-btn:active { transform: scale(0.97); }
+
+    #speak-toggle {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 10px 12px;
+      color: #94a3b8;
+      cursor: pointer;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      transition: border-color 0.2s, opacity 0.2s;
+      white-space: nowrap;
+    }
+    #speak-toggle:hover { border-color: var(--bot-color, #f97316); }
+
+    /* Click-to-talk hint label */
+    #click-hint {
+      position: absolute;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 10px;
+      color: #334155;
+      letter-spacing: 1px;
+      pointer-events: none;
+      z-index: 6;
+      white-space: nowrap;
+    }
   </style>
 </head>
 <body>
@@ -234,7 +381,7 @@
   <div id="top-bar">
     <div class="logo">
       ⚡ OPENCLAW WORLD
-      <span>// Phase 2</span>
+      <span>// Phase 3</span>
       <span id="live-badge">○ CONNECTING...</span>
     </div>
     <div class="status-right">
@@ -249,7 +396,42 @@
   <!-- Game -->
   <div id="game-wrapper">
     <div id="game-container"></div>
-    <div id="phase-label">v0.1.0 — ALPHA</div>
+    <div id="phase-label">v0.3.0 — ALPHA</div>
+    <div id="click-hint">▲ CLICK ANY BOT TO CHAT ▲</div>
+
+    <!-- ── Conversation Panel ─────────────────────────────────────────── -->
+    <div id="conv-panel">
+
+      <div class="panel-header">
+        <!-- Pixel-art face canvas: 160×160 logical pixels, displayed at 80×80 -->
+        <canvas id="bot-face" width="160" height="160"></canvas>
+        <div>
+          <div id="conv-bot-name">BOT NAME</div>
+          <div id="conv-bot-role">Role</div>
+        </div>
+        <button id="close-conv-btn" onclick="closeConvPanel()" title="Close">✕</button>
+      </div>
+
+      <!-- Chat history -->
+      <div id="chat-history"></div>
+
+      <!-- Input row -->
+      <div class="chat-input-row">
+        <input
+          id="chat-input"
+          type="text"
+          placeholder="Talk to this bot…"
+          onkeydown="if(event.key==='Enter' && !event.shiftKey){ event.preventDefault(); sendMessage(); }"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <button id="speak-toggle" onclick="toggleSpeak()" title="Toggle text-to-speech">🔊 Speak: ON</button>
+        <button id="send-btn" onclick="sendMessage()">SEND</button>
+      </div>
+
+    </div>
+    <!-- ── /Conversation Panel ─────────────────────────────────────────── -->
+
   </div>
 
   <!-- Bottom Status Bar -->
@@ -304,6 +486,8 @@
 
   <!-- Phaser Game -->
   <script src="src/world.js"></script>
+  <!-- Phase 3: Conversation Panel + Pixel Face + LLM + TTS -->
+  <script src="src/conversation.js"></script>
 
 </body>
 </html>

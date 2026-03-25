@@ -1,4 +1,4 @@
-// OpenClaw World — Phase 2
+// OpenClaw World — Phase 3
 // 4 AI bots walking around a sci-fi office/lab
 // Real-time activity feed via Socket.io from 82.197.92.190:3001
 
@@ -332,6 +332,7 @@ class WorldScene extends Phaser.Scene {
     BOTS.forEach((botDef, index) => {
       const bot = this.createBotSprite(botDef);
       bot.def = botDef;
+      bot.config = botDef;          // alias used by conversation panel
       bot.phraseIndex = 0;
       bot.currentActivity = botDef.phrases[0];
       bot.isMoving = false;
@@ -339,7 +340,38 @@ class WorldScene extends Phaser.Scene {
       bot.bubbleBg = null;
       bot.chatting = false;
       this.bots.push(bot);
+
+      // ── Click-to-talk interactivity ─────────────────────────────────────
+      bot.setInteractive(
+        new Phaser.Geom.Rectangle(-15, -22, 30, 52),
+        Phaser.Geom.Rectangle.Contains
+      );
+
+      bot.on('pointerdown', () => {
+        if (typeof window.openConversationPanel === 'function') {
+          window.openConversationPanel(botDef);
+        }
+      });
+
+      bot.on('pointerover', () => {
+        document.body.style.cursor = 'pointer';
+        // Subtle scale-up on hover
+        this.tweens.add({ targets: bot, scaleX: 1.08, scaleY: 1.08, duration: 120, ease: 'Quad.easeOut' });
+      });
+
+      bot.on('pointerout', () => {
+        document.body.style.cursor = 'default';
+        this.tweens.add({ targets: bot, scaleX: 1, scaleY: 1, duration: 120, ease: 'Quad.easeOut' });
+      });
     });
+  }
+
+  // Expose for conversation panel to cleanly clear a bubble
+  clearBotBubble(botId) {
+    const bot = this.bots.find(b => b.def && b.def.id === botId);
+    if (!bot) return;
+    if (bot.bubbleBg) { bot.bubbleBg.destroy(); bot.bubbleBg = null; }
+    if (bot.bubble)   { bot.bubble   = null; }
   }
 
   createBotSprite(def) {
