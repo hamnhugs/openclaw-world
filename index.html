@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex">
   <title>⚡ OpenClaw World</title>
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
@@ -381,7 +382,7 @@
   <div id="top-bar">
     <div class="logo">
       ⚡ OPENCLAW WORLD
-      <span>// Phase 3</span>
+      <span>// LIVE</span>
       <span id="live-badge">○ CONNECTING...</span>
     </div>
     <div class="status-right">
@@ -396,7 +397,7 @@
   <!-- Game -->
   <div id="game-wrapper">
     <div id="game-container"></div>
-    <div id="phase-label">v0.3.0 — ALPHA</div>
+    <div id="phase-label">v0.4.0 — LIVE</div>
     <div id="click-hint">▲ CLICK ANY BOT TO CHAT ▲</div>
 
     <!-- ── Conversation Panel ─────────────────────────────────────────── -->
@@ -470,6 +471,27 @@
     </div>
 
   </div>
+
+  <!-- Embed mode: ?embed=1 hides top/bottom bars and fills viewport -->
+  <script>
+    (function() {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('embed') === '1') {
+        document.addEventListener('DOMContentLoaded', function() {
+          const topBar = document.getElementById('top-bar');
+          const bottomBar = document.getElementById('bottom-bar');
+          if (topBar) topBar.style.display = 'none';
+          if (bottomBar) bottomBar.style.display = 'none';
+          // Make game wrapper fill viewport
+          const wrapper = document.getElementById('game-wrapper');
+          if (wrapper) {
+            wrapper.style.height = '100vh';
+            wrapper.style.flex = 'unset';
+          }
+        });
+      }
+    })();
+  </script>
 
   <!-- Live Clock -->
   <script>

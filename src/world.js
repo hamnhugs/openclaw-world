@@ -1,4 +1,4 @@
-// OpenClaw World — Phase 3
+// OpenClaw World — Phase 4 LIVE
 // 4 AI bots walking around a sci-fi office/lab
 // Real-time activity feed via Socket.io from 82.197.92.190:3001
 
@@ -123,12 +123,17 @@ class WorldScene extends Phaser.Scene {
     super({ key: 'WorldScene' });
     this.bots = [];
     this.statusUpdateCallbacks = [];
+    this.workstationGlowObjs = [];
+    this.eventLog = null;
   }
 
   create() {
     this.drawWorld();
+    this.addWorkstationGlowPulses();
     this.createBots();
     this.startBotLoops();
+    this.startIdleChecks();
+    this.eventLog = new EventLog(this);
     // Register scene for real-time events
     window._ocScene = this;
     // Show live indicator
@@ -151,20 +156,133 @@ class WorldScene extends Phaser.Scene {
   }
 
   handleRealActivity(gameId, evt) {
-    // Find the bot object
     const bot = this.bots.find(b => b.config.id === gameId);
-    if (!bot || bot.isBusy) return;
+    if (!bot) return;
 
-    // Map station name to coordinates
-    const coords = STATION_COORDS[evt.station] || STATION_COORDS.research;
+    const action  = (evt.action  || '').toLowerCase();
+    const detail  = evt.detail ? `${evt.action}: ${evt.detail}` : evt.action;
+    const rawDetail = evt.detail || '';
 
-    // Interrupt current loop and react to real event
+    // Update the event log panel
+    if (this.eventLog) {
+      this.eventLog.addEvent(gameId, evt.action || '', rawDetail);
+    }
+
+    // ── Wormy answering user → pulse/glow in place ────────────────────────
+    if (gameId === 'wormy' && action.includes('answering')) {
+      this.glowBot('wormy');
+      this.updateStatus('wormy', detail);
+      return;
+    }
+
+    // ── Dan Pen messaging/spawning → meet with Mech ───────────────────────
+    if (gameId === 'danpen' && (action.includes('messaging') || action.includes('spawning'))) {
+      if (!bot.isMeeting) {
+        this.meetBots('danpen', 'mech', detail);
+      }
+      return;
+    }
+
+    // ── Fleet message (Orion) → meet with Mech ────────────────────────────
+    if (action.includes('fleet message') || (gameId === 'orion' && action.includes('fleet'))) {
+      const orion = this.bots.find(b => b.config.id === 'orion');
+      if (orion && !orion.isMeeting) {
+        this.meetBots('orion', 'mech', detail);
+      }
+      return;
+    }
+
+    // ── Default behaviour ─────────────────────────────────────────────────
+    if (bot.isBusy || bot.isMeeting) return;
     bot.isBusy = true;
-    const detail = evt.detail ? `${evt.action}: ${evt.detail}` : evt.action;
+    const coords = STATION_COORDS[evt.station] || STATION_COORDS.research;
     this.walkTo(bot, coords.x, coords.y).then(() => {
       this.showBubble(bot, detail, 3000).then(() => {
         bot.isBusy = false;
       });
+    });
+  }
+
+  // ── Multi-bot meeting animation ─────────────────────────────────────────────
+  async meetBots(botIdA, botIdB, message) {
+    const botA = this.bots.find(b => b.config.id === botIdA);
+    const botB = this.bots.find(b => b.config.id === botIdB);
+    if (!botA || !botB) return;
+    if (botA.isMeeting || botB.isMeeting) return;
+
+    botA.isMeeting = true;
+    botB.isMeeting = true;
+
+    // Compute midpoint and direction
+    const stA = botA.config.station;
+    const stB = botB.config.station;
+    const midX = (stA.x + stB.x) / 2;
+    const midY = (stA.y + stB.y) / 2;
+    const dx   = stB.x - stA.x;
+    const dy   = stB.y - stA.y;
+    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+    const nx   = dx / dist;
+    const ny   = dy / dist;
+    const gap  = 30; // each bot stops 30px from midpoint → 60px total
+
+    // Walk toward each other
+    await Promise.all([
+      this.walkTo(botA, midX - nx * gap, midY - ny * gap),
+      this.walkTo(botB, midX + nx * gap, midY + ny * gap),
+    ]);
+
+    // Draw pulsing connection line
+    const lineG = this.add.graphics();
+    const lineState = { alpha: 0 };
+    const updateLine = () => {
+      lineG.clear();
+      if (!botA.active || !botB.active) return;
+      lineG.lineStyle(2, 0xffffff, lineState.alpha);
+      lineG.lineBetween(botA.x, botA.y, botB.x, botB.y);
+    };
+    this.tweens.add({
+      targets: lineState,
+      alpha: 0.8,
+      duration: 250,
+      yoyo: true,
+      repeat: 7,           // ~4 pulses over ~2 seconds
+      ease: 'Sine.easeInOut',
+      onUpdate: updateLine,
+      onComplete: () => lineG.destroy(),
+    });
+
+    // Speech bubbles simultaneously
+    const trimmed = (message || '').slice(0, 40);
+    await Promise.all([
+      this.showBubble(botA, trimmed, 2000),
+      this.showBubble(botB, '...', 2000),
+    ]);
+
+    await this.wait(200);
+
+    // Walk back to stations
+    await Promise.all([
+      this.walkTo(botA, stA.x, stA.y),
+      this.walkTo(botB, stB.x, stB.y),
+    ]);
+
+    botA.isMeeting = false;
+    botB.isMeeting = false;
+  }
+
+  // ── Glow pulse (Wormy answering user) ──────────────────────────────────────
+  glowBot(botId) {
+    const bot = this.bots.find(b => b.config.id === botId);
+    if (!bot) return;
+    // Scale pulse
+    this.tweens.add({
+      targets: bot,
+      scaleX: 1.25,
+      scaleY: 1.25,
+      duration: 180,
+      yoyo: true,
+      repeat: 3,
+      ease: 'Sine.easeInOut',
     });
   }
 
@@ -339,6 +457,8 @@ class WorldScene extends Phaser.Scene {
       bot.bubble = null;
       bot.bubbleBg = null;
       bot.chatting = false;
+      bot.isMeeting = false;
+      bot.lastMoveTime = Date.now();
       this.bots.push(bot);
 
       // ── Click-to-talk interactivity ─────────────────────────────────────
@@ -515,6 +635,9 @@ class WorldScene extends Phaser.Scene {
       const dist = Math.sqrt(dx * dx + dy * dy);
       if (dist < 5) { resolve(); return; }
 
+      // Track last movement time (for idle animations)
+      bot.lastMoveTime = Date.now();
+
       const speed = 120 + Math.random() * 60; // pixels per second
       const duration = (dist / speed) * 1000;
 
@@ -524,7 +647,10 @@ class WorldScene extends Phaser.Scene {
         y: targetY,
         duration: Math.min(duration, 4000),
         ease: 'Linear',
-        onComplete: () => resolve(),
+        onComplete: () => {
+          bot.lastMoveTime = Date.now(); // reset on arrival
+          resolve();
+        },
       });
     });
   }
@@ -618,6 +744,75 @@ class WorldScene extends Phaser.Scene {
     });
   }
 
+  // ── Workstation glow pulse animations ─────────────────────────────────────
+  addWorkstationGlowPulses() {
+    const workstations = [
+      { x: 120,             y: 100,            color: 0xf97316 },
+      { x: WORLD_W - 120,   y: 100,            color: 0x3b82f6 },
+      { x: 120,             y: WORLD_H - 100,  color: 0x22c55e },
+      { x: WORLD_W - 120,   y: WORLD_H - 100,  color: 0xa855f7 },
+    ];
+
+    workstations.forEach((ws, i) => {
+      const glow = this.add.graphics();
+      glow.fillStyle(ws.color, 0.18);
+      glow.fillRect(ws.x - 36, ws.y - 22, 72, 44);
+      glow.setAlpha(0.3);
+
+      this.tweens.add({
+        targets: glow,
+        alpha: { from: 0.3, to: 0.7 },
+        duration: 2200 + i * 350,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+        delay: i * 500,
+      });
+
+      this.workstationGlowObjs.push(glow);
+    });
+  }
+
+  // ── Ambient idle animations ────────────────────────────────────────────────
+  startIdleChecks() {
+    this.bots.forEach(bot => {
+      bot.lastMoveTime = Date.now();
+      this.scheduleIdleMicro(bot);
+      this.scheduleIdleThink(bot);
+    });
+  }
+
+  scheduleIdleMicro(bot) {
+    const delay = 2000 + Math.random() * 1000;
+    this.time.delayedCall(delay, () => {
+      const idleMs = Date.now() - (bot.lastMoveTime || 0);
+      if (idleMs > 5000 && !bot.isBusy && !bot.isMeeting && bot.active) {
+        const shiftX = (Math.random() - 0.5) * 6;
+        const shiftY = (Math.random() - 0.5) * 6;
+        this.tweens.add({
+          targets: bot,
+          x: bot.x + shiftX,
+          y: bot.y + shiftY,
+          duration: 400,
+          ease: 'Sine.easeInOut',
+          yoyo: true,
+        });
+      }
+      this.scheduleIdleMicro(bot);
+    });
+  }
+
+  scheduleIdleThink(bot) {
+    const delay = 8000 + Math.random() * 4000;
+    this.time.delayedCall(delay, () => {
+      const idleMs = Date.now() - (bot.lastMoveTime || 0);
+      if (idleMs > 5000 && !bot.isBusy && !bot.isMeeting && !bot.bubble && bot.active) {
+        this.showBubble(bot, '...', 1800);
+      }
+      this.scheduleIdleThink(bot);
+    });
+  }
+
   wait(ms) {
     return new Promise(resolve => this.time.delayedCall(ms, resolve));
   }
@@ -629,6 +824,87 @@ class WorldScene extends Phaser.Scene {
 
   update() {
     // Keep bubbles following bots (handled by event listener in showBubble)
+  }
+}
+
+// ─── EventLog: Fleet Status panel (bottom-right, Phaser Text) ─────────────────
+class EventLog {
+  constructor(scene) {
+    this.scene   = scene;
+    this.events  = [];
+    this.maxEvents = 5;
+
+    const PAD    = 10;
+    this.panelW  = 220;
+    this.panelH  = 150;
+    this.panelX  = WORLD_W - PAD - this.panelW;
+    this.panelY  = WORLD_H - PAD - this.panelH;
+
+    // Background panel
+    const bg = scene.add.graphics();
+    bg.fillStyle(0x000000, 0.72);
+    bg.fillRoundedRect(this.panelX, this.panelY, this.panelW, this.panelH, 5);
+    bg.lineStyle(1, 0x1e293b, 1);
+    bg.strokeRoundedRect(this.panelX, this.panelY, this.panelW, this.panelH, 5);
+    bg.setDepth(50);
+
+    // Title
+    const title = scene.add.text(
+      this.panelX + 8, this.panelY + 6,
+      'FLEET STATUS',
+      { fontSize: '8px', fontFamily: 'monospace', color: '#475569' }
+    );
+    title.setDepth(51);
+
+    // Divider
+    const div = scene.add.graphics();
+    div.lineStyle(1, 0x1e293b, 0.8);
+    div.lineBetween(this.panelX + 6, this.panelY + 19, this.panelX + this.panelW - 6, this.panelY + 19);
+    div.setDepth(51);
+
+    // Text lines for events
+    this.textLines = [];
+    for (let i = 0; i < this.maxEvents; i++) {
+      const line = scene.add.text(
+        this.panelX + 8,
+        this.panelY + 24 + i * 24,
+        '',
+        {
+          fontSize: '10px',
+          fontFamily: 'monospace',
+          color: '#64748b',
+          wordWrap: { width: this.panelW - 16 },
+        }
+      );
+      line.setDepth(52);
+      this.textLines.push(line);
+    }
+  }
+
+  addEvent(botId, action, detail) {
+    const BOT_EMOJIS = { danpen: '🔬', mech: '⚙️', wormy: '💬', orion: '📋' };
+    const BOT_COLORS = { danpen: '#f97316', mech: '#3b82f6', wormy: '#22c55e', orion: '#a855f7' };
+    const emoji  = BOT_EMOJIS[botId] || '🤖';
+    const color  = BOT_COLORS[botId] || '#94a3b8';
+    const label  = `${emoji} ${(action || '').slice(0, 18)}`;
+    const sub    = detail ? `: ${detail.slice(0, 20)}` : '';
+
+    this.events.unshift({ text: label + sub, color });
+    if (this.events.length > this.maxEvents) this.events.length = this.maxEvents;
+    this._render();
+  }
+
+  _render() {
+    for (let i = 0; i < this.maxEvents; i++) {
+      const evt = this.events[i];
+      if (evt) {
+        this.textLines[i].setText(evt.text);
+        this.textLines[i].setColor(evt.color);
+        this.textLines[i].setAlpha(Math.max(0.2, 1 - i * 0.18));
+      } else {
+        this.textLines[i].setText('');
+      }
+    }
   }
 }
 
